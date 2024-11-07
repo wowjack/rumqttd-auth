@@ -2,6 +2,7 @@ use rumqttc::mqttbytes::v4::*;
 use rumqttc::mqttbytes::*;
 use std::collections::VecDeque;
 use std::io;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::select;

@@ -32,6 +32,7 @@ pub mod protocol;
 mod router;
 mod segments;
 mod server;
+mod crypto;
 
 pub type ConnectionId = usize;
 pub type RouterId = usize;
@@ -63,6 +64,7 @@ pub struct Config {
     pub bridge: Option<BridgeConfig>,
     pub prometheus: Option<PrometheusSetting>,
     pub metrics: Option<HashMap<MetricType, MetricSettings>>,
+    pub keystore_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

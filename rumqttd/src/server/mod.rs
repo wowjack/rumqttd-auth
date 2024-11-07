@@ -4,6 +4,8 @@ mod broker;
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 mod tls;
 
+pub mod keystore;
+
 pub use broker::Broker;
 
 // pub trait IO: AsyncRead + AsyncWrite + Send + Sync + Unpin {}

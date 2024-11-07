@@ -1,3 +1,4 @@
+#![allow(unused)]
 use crate::link::alerts::{self};
 use crate::link::console::ConsoleLink;
 use crate::link::network::{self, Network, N};
@@ -42,6 +43,8 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::time::error::Elapsed;
 use tokio::{task, time};
 
+use super::keystore::{load_keystore, Keystore};
+
 #[derive(Debug, thiserror::Error)]
 #[error("Acceptor error")]
 pub enum Error {
@@ -67,6 +70,7 @@ pub enum Error {
 pub struct Broker {
     config: Arc<Config>,
     router_tx: Sender<(ConnectionId, Event)>,
+    keystore: Arc<Keystore>,
 }
 
 impl Broker {
@@ -74,6 +78,8 @@ impl Broker {
         let config = Arc::new(config);
         let router_config = config.router.clone();
         let router: Router = Router::new(config.id, router_config);
+        let keystore = Arc::new(load_keystore(&config).unwrap_or_default());
+
 
         // Setup cluster if cluster settings are configured.
         match config.cluster.clone() {
@@ -87,11 +93,11 @@ impl Broker {
                 // Start router first and then cluster in the background
                 let router_tx = router.spawn();
                 // cluster.spawn();
-                Broker { config, router_tx }
+                Broker { config, router_tx, keystore }
             }
             None => {
                 let router_tx = router.spawn();
-                Broker { config, router_tx }
+                Broker { config, router_tx, keystore }
             }
         }
     }
@@ -206,12 +212,13 @@ impl Broker {
             for (_, config) in v4_config.clone() {
                 let server_thread = thread::Builder::new().name(config.name.clone());
                 let mut server = Server::new(config, self.router_tx.clone(), V4);
+                let ks = self.keystore.clone();
                 let handle = server_thread.spawn(move || {
                     let mut runtime = tokio::runtime::Builder::new_current_thread();
                     let runtime = runtime.enable_all().build().unwrap();
 
                     runtime.block_on(async {
-                        if let Err(e) = server.start(LinkType::Remote).await {
+                        if let Err(e) = server.start(LinkType::Remote, ks).await {
                             error!(error=?e, "Server error - V4");
                         }
                     });
@@ -224,12 +231,13 @@ impl Broker {
             for (_, config) in v5_config.clone() {
                 let server_thread = thread::Builder::new().name(config.name.clone());
                 let mut server = Server::new(config, self.router_tx.clone(), V5);
+                let ks = self.keystore.clone();
                 let handle = server_thread.spawn(move || {
                     let mut runtime = tokio::runtime::Builder::new_current_thread();
                     let runtime = runtime.enable_all().build().unwrap();
 
                     runtime.block_on(async {
-                        if let Err(e) = server.start(LinkType::Remote).await {
+                        if let Err(e) = server.start(LinkType::Remote, ks).await {
                             error!(error=?e, "Server error - V5");
                         }
                     });
@@ -249,12 +257,13 @@ impl Broker {
                 let server_thread = thread::Builder::new().name(config.name.clone());
                 //TODO: Add support for V5 procotol with websockets. Registered in config or on ServerSettings
                 let mut server = Server::new(config, self.router_tx.clone(), V4);
+                let ks = self.keystore.clone();
                 let handle = server_thread.spawn(move || {
                     let mut runtime = tokio::runtime::Builder::new_current_thread();
                     let runtime = runtime.enable_all().build().unwrap();
 
                     runtime.block_on(async {
-                        if let Err(e) = server.start(LinkType::Websocket).await {
+                        if let Err(e) = server.start(LinkType::Websocket, ks).await {
                             error!(error=?e, "Server error - WS");
                         }
                     });
@@ -379,7 +388,7 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
         Ok((Box::new(stream), None))
     }
 
-    async fn start(&mut self, link_type: LinkType) -> Result<(), Error> {
+    async fn start(&mut self, link_type: LinkType, keystore: Arc<Keystore>) -> Result<(), Error> {
         let listener = TcpListener::bind(&self.config.listen).await?;
         let delay = Duration::from_millis(self.config.next_connection_delay_ms);
         let mut count: usize = 0;
@@ -435,6 +444,7 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
                             stream,
                             protocol,
                             self.awaiting_will_handler.clone(),
+                            keystore.clone()
                         )
                         .instrument(tracing::info_span!(
                             "websocket_link",
@@ -451,6 +461,7 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
                         network,
                         protocol,
                         self.awaiting_will_handler.clone(),
+                        keystore.clone()
                     )
                     .instrument(tracing::error_span!(
                         "remote_link",
@@ -496,6 +507,7 @@ async fn remote<P: Protocol>(
     stream: Box<dyn N>,
     protocol: P,
     will_handlers: Arc<Mutex<HashMap<String, Sender<AwaitingWill>>>>,
+    keystore: Arc<Keystore>
 ) {
     let mut network = Network::new(
         stream,
@@ -558,6 +570,7 @@ async fn remote<P: Protocol>(
         connect_packet,
         dynamic_filters,
         assigned_client_id,
+        keystore
     )
     .await
     {
@@ -571,6 +584,8 @@ async fn remote<P: Protocol>(
     let connection_id = link.connection_id;
     let will_delay_interval = link.will_delay_interval;
     let mut send_disconnect = true;
+
+
 
     match link.start().await {
         // Connection got closed. This shouldn't usually happen.

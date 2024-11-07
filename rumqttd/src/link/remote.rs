@@ -1,9 +1,11 @@
+use crate::crypto::{compute_tag, generate_challenge};
 use crate::link::local::{LinkError, LinkRx, LinkTx};
 use crate::link::network;
 use crate::link::network::Network;
 use crate::local::LinkBuilder;
 use crate::protocol::{ConnAck, Connect, ConnectReturnCode, Login, Packet, Protocol};
 use crate::router::{Event, Notification};
+use crate::server::keystore::Keystore;
 use crate::{ConnectionId, ConnectionSettings};
 
 use flume::{RecvError, SendError, Sender, TrySendError};
@@ -68,6 +70,7 @@ impl<P: Protocol> RemoteLink<P> {
         connect_packet: Packet,
         dynamic_filters: bool,
         assigned_client_id: Option<String>,
+        keystore: Arc<Keystore>
     ) -> Result<RemoteLink<P>, Error> {
         let Packet::Connect(connect, props, lastwill, lastwill_props, _) = connect_packet else {
             return Err(Error::NotConnectPacket(connect_packet));
@@ -76,7 +79,14 @@ impl<P: Protocol> RemoteLink<P> {
         // Register this connection with the router. Router replys with ack which if ok will
         // start the link. Router can sometimes reject the connection (ex max connection limit)
         let client_id = assigned_client_id.as_ref().unwrap_or(&connect.client_id);
+        let client_key = keystore.get_client_key(client_id);
+        if client_key.is_none() {
+            return Err(Error::InvalidClientId)
+        }
         let clean_session = connect.clean_session;
+
+        let challenge = generate_challenge();
+        let tag = compute_tag(client_key.unwrap(), challenge, client_id);
 
         let topic_alias_max = props.as_ref().and_then(|p| p.topic_alias_max);
         let session_expiry = props
@@ -105,6 +115,7 @@ impl<P: Protocol> RemoteLink<P> {
         let id = link_rx.id();
         Span::current().record("connection_id", id);
 
+
         if let Some(mut packet) = notification.into() {
             if let Packet::ConnAck(_ack, props) = &mut packet {
                 let mut new_props = props.clone().unwrap_or_default();
@@ -113,6 +124,8 @@ impl<P: Protocol> RemoteLink<P> {
                 network.write(packet).await?;
             }
         }
+
+        println!("tag: {tag:?}");
 
         Ok(RemoteLink {
             connect,

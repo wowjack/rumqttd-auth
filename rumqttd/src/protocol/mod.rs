@@ -38,6 +38,8 @@ pub enum Packet {
     Unsubscribe(Unsubscribe, Option<UnsubscribeProperties>),
     UnsubAck(UnsubAck, Option<UnsubAckProperties>),
     Disconnect(Disconnect, Option<DisconnectProperties>),
+    Auth(Auth, Option<AuthProperties>),
+    PubReq(PubReq)
 }
 
 //--------------------------- Connect packet -------------------------------
@@ -573,6 +575,48 @@ pub struct DisconnectProperties {
     pub server_reference: Option<String>,
 }
 //------------------------------------------------------------------------
+
+//--------------------------- Auth packet -------------------------------
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Auth {
+    pub pkid: u16,
+    pub reason: AuthReasonCode,
+    pub response: Bytes
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthProperties {
+    challenge: Option<Bytes>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum AuthReasonCode {
+    Response = 1,
+    Close = 2,
+    Drop = 3,
+    Unsupported = 4,
+}
+pub fn auth_reason_code(num: u8) -> Option<AuthReasonCode> {
+    match num {
+        1 => Some(AuthReasonCode::Response),
+        2 => Some(AuthReasonCode::Close),
+        3 => Some(AuthReasonCode::Drop),
+        4 => Some(AuthReasonCode::Unsupported),
+        _ => None
+    }
+}
+//------------------------------------------------------------------------
+
+//--------------------------- Disconnect packet -------------------------------
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PubReq {
+    pub topic: Bytes,
+    pub challenge_nonce: [u8; 12] // 96 bit nonce
+}
+
+//------------------------------------------------------------------------
+
 
 /// Quality of service
 #[repr(u8)]

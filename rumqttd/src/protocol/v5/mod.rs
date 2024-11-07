@@ -18,6 +18,8 @@ mod suback;
 mod subscribe;
 mod unsuback;
 mod unsubscribe;
+mod auth;
+mod pubreq;
 
 /// MQTT packet type
 #[repr(u8)]
@@ -37,6 +39,8 @@ pub enum PacketType {
     PingReq,
     PingResp,
     Disconnect,
+    Auth,
+    PubReq
 }
 
 #[repr(u8)]
@@ -123,6 +127,8 @@ impl FixedHeader {
             12 => Ok(PacketType::PingReq),
             13 => Ok(PacketType::PingResp),
             14 => Ok(PacketType::Disconnect),
+            15 => Ok(PacketType::Auth),
+            16 => Ok(PacketType::PubReq),
             _ => Err(Error::InvalidPacketType(num)),
         }
     }
@@ -469,6 +475,8 @@ impl Protocol for V5 {
             }
             Packet::PingReq(pingreq) => ping::pingreq::write(buffer)?,
             Packet::PingResp(pingresp) => ping::pingresp::write(buffer)?,
+            Packet::Auth(auth, properties) => auth::write(&auth, &properties, buffer)?,
+            Packet::PubReq(pubreq) => pubreq::write(&pubreq, buffer)?,
             _ => unreachable!(),
         };
         Ok(size)
